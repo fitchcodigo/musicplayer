@@ -1,3 +1,4 @@
+import json
 import flet as ft
 import os
 import pygame
@@ -26,27 +27,53 @@ class MusicApp:
         )
         
         self.music_table = ft.DataTable(columns=[
-            ft.DataColumn(ft.Text("Archivo")),
-            ft.DataColumn(ft.Text("Duración")),
-            ft.DataColumn(ft.Text("Añadir a Lista"))
+            ft.DataColumn(ft.Text("File Name")),
+            ft.DataColumn(ft.Text("Artist")),
+            ft.DataColumn(ft.Text("Duration")),
+            ft.DataColumn(ft.Text("Add to Playlist"))
         ], rows=[])
+        
+        self.playlist_view = ft.ListView()
         
         self.page.add(
             ft.Container(
                 content=ft.Column([
-                    ft.Text("Organizador de Música", size=24, weight="bold"),
-                    ft.ElevatedButton("Seleccionar Carpeta", on_click=lambda _: self.folder_picker.get_directory_path()),
+                    ft.Text("Music Playlist Organizer", size=24, weight="bold"),
+                    ft.Row([
+                        ft.ElevatedButton("Select Folder", on_click=lambda _: self.folder_picker.get_directory_path()),
+                        ft.ElevatedButton("Create Playlist", on_click=self.create_playlist),
+                        ft.ElevatedButton("Save Playlists", on_click=self.save_playlists),
+                        ft.ElevatedButton("Load Playlists", on_click=self.load_playlists)
+                    ], alignment=ft.MainAxisAlignment.CENTER),
                     self.playlist_dropdown,
                     self.music_table,
+                    ft.Text("Playlists", size=20, weight="bold"),
+                    self.playlist_view,
                     ft.Row([
-                        ft.ElevatedButton("Reproducir", on_click=self.play_music),
-                        ft.ElevatedButton("Pausar", on_click=self.pause_music),
-                        ft.ElevatedButton("Detener", on_click=self.stop_music)
+                        ft.ElevatedButton("Play", on_click=self.play_music),
+                        ft.ElevatedButton("Pause", on_click=self.pause_music),
+                        ft.ElevatedButton("Stop", on_click=self.stop_music),
+                        ft.ElevatedButton("Next", on_click=self.next_song)
                     ], alignment=ft.MainAxisAlignment.CENTER)
                 ], spacing=10, alignment=ft.MainAxisAlignment.CENTER),
-                padding=20
+                padding=20,
+                border_radius=10,
+                bgcolor=ft.colors.GREY_900
             )
         )
+    
+    def save_playlists(self, e):
+        with open("playlists.json", "w") as f:
+            json.dump(self.playlists, f)
+    
+    def load_playlists(self, e):
+        try:
+            with open("playlists.json", "r") as f:
+                self.playlists = json.load(f)
+                self.update_playlist_dropdown()
+                self.update_playlist_view()
+        except FileNotFoundError:
+            pass
     
     def pick_folder(self, e: ft.FilePickerResultEvent):
         if e.path:
@@ -54,6 +81,9 @@ class MusicApp:
             self.scan_music_folder()
     
     def scan_music_folder(self):
+        if not self.music_folder:
+            return
+        
         self.music_files.clear()
         self.music_table.rows.clear()
         
@@ -61,28 +91,34 @@ class MusicApp:
             if file.endswith(".mp3") or file.endswith(".wav"):
                 file_path = self.music_folder / file
                 metadata = self.get_metadata(file_path)
-                self.music_files.append((file, file_path))
+                self.music_files.append((file, file_path, metadata))
                 self.music_table.rows.append(
                     ft.DataRow(cells=[
                         ft.DataCell(ft.Text(file)),
+                        ft.DataCell(ft.Text(metadata["artist"])),
                         ft.DataCell(ft.Text(metadata["duration"])),
-                        ft.DataCell(ft.ElevatedButton("Añadir", on_click=lambda e, f=file_path: self.add_to_playlist(f)))
+                        ft.DataCell(ft.ElevatedButton("Add", on_click=lambda e, f=file_path: self.add_to_playlist(f)))
                     ])
                 )
+        
         self.page.update()
     
     def get_metadata(self, file_path):
         try:
-            audio = MP3(file_path) if file_path.suffix == ".mp3" else WAVE(file_path)
+            if file_path.suffix == ".mp3":
+                audio = MP3(file_path)
+            else:
+                audio = WAVE(file_path)
             duration = int(audio.info.length)
-            return {"duration": f"{duration // 60}:{duration % 60:02}"}
+            return {"artist": "Unknown", "album": "Unknown", "duration": f"{duration // 60}:{duration % 60:02}"}
         except:
-            return {"duration": "0:00"}
+            return {"artist": "Unknown", "album": "Unknown", "duration": "0:00"}
     
     def create_playlist(self, e):
-        playlist_name = f"Lista {len(self.playlists) + 1}"
+        playlist_name = f"Playlist {len(self.playlists) + 1}"
         self.playlists[playlist_name] = []
         self.update_playlist_dropdown()
+        self.update_playlist_view()
     
     def select_playlist(self, e):
         self.current_playlist = self.playlist_dropdown.value
@@ -91,9 +127,16 @@ class MusicApp:
         if not self.playlists or not self.current_playlist:
             return
         self.playlists[self.current_playlist].append(str(file_path))
+        self.update_playlist_view()
     
     def update_playlist_dropdown(self):
         self.playlist_dropdown.options = [ft.dropdown.Option(name) for name in self.playlists.keys()]
+        self.page.update()
+    
+    def update_playlist_view(self):
+        self.playlist_view.controls.clear()
+        for name, songs in self.playlists.items():
+            self.playlist_view.controls.append(ft.Text(f"{name}: {', '.join(songs)}"))
         self.page.update()
     
     def play_music(self, e):
@@ -107,6 +150,11 @@ class MusicApp:
         pygame.mixer.music.play()
         self.playing = True
     
+    def next_song(self, e):
+        if self.current_playlist and self.current_song_index < len(self.playlists[self.current_playlist]) - 1:
+            self.current_song_index += 1
+            self.load_and_play_song()
+    
     def pause_music(self, e):
         if self.playing:
             pygame.mixer.music.pause()
@@ -116,10 +164,8 @@ class MusicApp:
         pygame.mixer.music.stop()
         self.playing = False
 
-
 def main(page: ft.Page):
-    page.title = "Organizador de Música"
+    page.title = "Music Playlist Organizer"
     app = MusicApp(page)
     page.update()
-
 ft.app(target=main)
