@@ -168,4 +168,5 @@ def main(page: ft.Page):
     page.title = "Music Playlist Organizer"
     app = MusicApp(page)
     page.update()
+
 ft.app(target=main)
