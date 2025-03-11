@@ -15,6 +15,7 @@ class MusicApp:
         self.current_playlist = None
         self.current_song_index = 0
         self.playing = False
+        self.paused = False
         
         pygame.mixer.init()
         
@@ -30,7 +31,8 @@ class MusicApp:
             ft.DataColumn(ft.Text("File Name")),
             ft.DataColumn(ft.Text("Artist")),
             ft.DataColumn(ft.Text("Duration")),
-            ft.DataColumn(ft.Text("Add to Playlist"))
+            ft.DataColumn(ft.Text("Add to Playlist")),
+            ft.DataColumn(ft.Text("Remove from Playlist"))
         ], rows=[])
         
         self.playlist_view = ft.ListView()
@@ -42,6 +44,7 @@ class MusicApp:
                     ft.Row([
                         ft.ElevatedButton("Select Folder", on_click=lambda _: self.folder_picker.get_directory_path()),
                         ft.ElevatedButton("Create Playlist", on_click=self.create_playlist),
+                        ft.ElevatedButton("Delete Playlist", on_click=self.delete_playlist),
                         ft.ElevatedButton("Save Playlists", on_click=self.save_playlists),
                         ft.ElevatedButton("Load Playlists", on_click=self.load_playlists)
                     ], alignment=ft.MainAxisAlignment.CENTER),
@@ -53,7 +56,8 @@ class MusicApp:
                         ft.ElevatedButton("Play", on_click=self.play_music),
                         ft.ElevatedButton("Pause", on_click=self.pause_music),
                         ft.ElevatedButton("Stop", on_click=self.stop_music),
-                        ft.ElevatedButton("Next", on_click=self.next_song)
+                        ft.ElevatedButton("Next", on_click=self.next_song),
+                        ft.ElevatedButton("Previous", on_click=self.previous_song)
                     ], alignment=ft.MainAxisAlignment.CENTER)
                 ], spacing=10, alignment=ft.MainAxisAlignment.CENTER),
                 padding=20,
@@ -62,18 +66,54 @@ class MusicApp:
             )
         )
     
-    def save_playlists(self, e):
-        with open("playlists.json", "w") as f:
-            json.dump(self.playlists, f)
+    def pause_music(self, e):
+        if self.playing:
+            pygame.mixer.music.pause()
+            self.playing = False
+            self.paused = True
+        elif self.paused:
+            pygame.mixer.music.unpause()
+            self.playing = True
+            self.paused = False
+
+    def stop_music(self, e):
+        pygame.mixer.music.stop()
+        self.playing = False
+        self.paused = False
+
+    def play_music(self, e):
+        if self.current_playlist and self.playlists[self.current_playlist]:
+            if self.paused:
+                pygame.mixer.music.unpause()
+                self.playing = True
+                self.paused = False
+            else:
+                self.current_song_index = 0
+                self.load_and_play_song()
     
-    def load_playlists(self, e):
-        try:
-            with open("playlists.json", "r") as f:
-                self.playlists = json.load(f)
-                self.update_playlist_dropdown()
-                self.update_playlist_view()
-        except FileNotFoundError:
-            pass
+    def load_and_play_song(self):
+        song_path = self.playlists[self.current_playlist][self.current_song_index]
+        pygame.mixer.music.load(song_path)
+        pygame.mixer.music.play()
+        self.playing = True
+        self.paused = False
+
+    def next_song(self, e):
+        if self.current_playlist and self.current_song_index < len(self.playlists[self.current_playlist]) - 1:
+            self.current_song_index += 1
+            self.load_and_play_song()
+    
+    def previous_song(self, e):
+        if self.current_playlist and self.current_song_index > 0:
+            self.current_song_index -= 1
+            self.load_and_play_song()
+    
+    def delete_playlist(self, e):
+        if self.current_playlist in self.playlists:
+            del self.playlists[self.current_playlist]
+            self.current_playlist = None
+            self.update_playlist_dropdown()
+            self.update_playlist_view()
     
     def pick_folder(self, e: ft.FilePickerResultEvent):
         if e.path:
@@ -97,7 +137,8 @@ class MusicApp:
                         ft.DataCell(ft.Text(file)),
                         ft.DataCell(ft.Text(metadata["artist"])),
                         ft.DataCell(ft.Text(metadata["duration"])),
-                        ft.DataCell(ft.ElevatedButton("Add", on_click=lambda e, f=file_path: self.add_to_playlist(f)))
+                        ft.DataCell(ft.ElevatedButton("Add", on_click=lambda e, f=file_path: self.add_to_playlist(f))),
+                        ft.DataCell(ft.ElevatedButton("Remove", on_click=lambda e, f=file_path: self.remove_from_playlist(f)))
                     ])
                 )
         
@@ -126,8 +167,27 @@ class MusicApp:
     def add_to_playlist(self, file_path):
         if not self.playlists or not self.current_playlist:
             return
-        self.playlists[self.current_playlist].append(str(file_path))
-        self.update_playlist_view()
+        if str(file_path) not in self.playlists[self.current_playlist]:
+            self.playlists[self.current_playlist].append(str(file_path))
+            self.update_playlist_view()
+    
+    def remove_from_playlist(self, file_path):
+        if self.current_playlist and str(file_path) in self.playlists[self.current_playlist]:
+            self.playlists[self.current_playlist].remove(str(file_path))
+            self.update_playlist_view()
+    
+    def save_playlists(self, e):
+        with open("playlists.json", "w") as f:
+            json.dump(self.playlists, f)
+    
+    def load_playlists(self, e):
+        try:
+            with open("playlists.json", "r") as f:
+                self.playlists = json.load(f)
+                self.update_playlist_dropdown()
+                self.update_playlist_view()
+        except FileNotFoundError:
+            pass
     
     def update_playlist_dropdown(self):
         self.playlist_dropdown.options = [ft.dropdown.Option(name) for name in self.playlists.keys()]
@@ -138,31 +198,6 @@ class MusicApp:
         for name, songs in self.playlists.items():
             self.playlist_view.controls.append(ft.Text(f"{name}: {', '.join(songs)}"))
         self.page.update()
-    
-    def play_music(self, e):
-        if self.current_playlist and self.playlists[self.current_playlist]:
-            self.current_song_index = 0
-            self.load_and_play_song()
-    
-    def load_and_play_song(self):
-        song_path = self.playlists[self.current_playlist][self.current_song_index]
-        pygame.mixer.music.load(song_path)
-        pygame.mixer.music.play()
-        self.playing = True
-    
-    def next_song(self, e):
-        if self.current_playlist and self.current_song_index < len(self.playlists[self.current_playlist]) - 1:
-            self.current_song_index += 1
-            self.load_and_play_song()
-    
-    def pause_music(self, e):
-        if self.playing:
-            pygame.mixer.music.pause()
-            self.playing = False
-    
-    def stop_music(self, e):
-        pygame.mixer.music.stop()
-        self.playing = False
 
 def main(page: ft.Page):
     page.title = "Music Playlist Organizer"
